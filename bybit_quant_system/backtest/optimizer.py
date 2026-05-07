@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover
     )
 
 # Local imports
-from engine import BacktestEngine, BacktestResult, Signal
+from .engine import BacktestEngine, BacktestResult
 
 
 # ---------------------------------------------------------------------------

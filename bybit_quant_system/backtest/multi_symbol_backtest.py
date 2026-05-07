@@ -16,7 +16,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-from engine import BacktestEngine, BacktestResult
+from .engine import BacktestEngine, BacktestResult
 
 
 # ---------------------------------------------------------------------------

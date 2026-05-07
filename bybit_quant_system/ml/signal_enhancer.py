@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
         stacklevel=2,
     )
 
-from feature_engineer import FeatureEngineer
+from .feature_engineer import FeatureEngineer
 
 
 # ---------------------------------------------------------------------------
