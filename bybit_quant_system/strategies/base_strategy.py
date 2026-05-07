@@ -30,5 +30,13 @@ class BaseStrategy(ABC):
     def get_required_data(self) -> tuple:
         return (None, "15", 200)
 
+    def get_parameters(self) -> dict:
+        """返回策略参数字典（用于回测引擎）"""
+        return {
+            "name": self.name,
+            "timeframe": self.get_required_data()[1],
+            **self.config,
+        }
+
     def __repr__(self):
         return f"{self.name}(config={self.config})"

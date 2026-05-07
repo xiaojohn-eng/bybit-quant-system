@@ -99,6 +99,9 @@ class PaperTradingEngine:
         # Concurrency
         self._lock = asyncio.Lock()
 
+        # Price cache (for _get_price when client unavailable)
+        self._last_prices: Dict[str, float] = {}
+
         logger.info("PaperTradingEngine initialised balance=%.2f", initial_balance)
 
     # ------------------------------------------------------------------ #
@@ -124,6 +127,7 @@ class PaperTradingEngine:
         dict
             Order result with ``order_id``, ``filled_price``, ``margin``, etc.
         """
+        side = side.lower()
         async with self._lock:
             fill_price: float = price or await self._get_price(symbol)
             notional: float = qty * fill_price
@@ -297,11 +301,13 @@ class PaperTradingEngine:
             now: datetime = datetime.now(timezone.utc)
 
             for symbol, data in price_data.items():
+                current_price: float = float(data["price"]) if isinstance(data, dict) else float(data)
+                self._last_prices[symbol] = current_price  # Always cache latest price
+
                 if symbol not in self.positions:
                     continue
 
                 pos: _PaperPosition = self.positions[symbol]
-                current_price: float = float(data["price"]) if isinstance(data, dict) else float(data)
                 pos.unrealized_pnl = self._calc_pnl(pos, current_price, pos.qty)
 
                 # ---- Check liquidation --------------------------------
@@ -321,7 +327,7 @@ class PaperTradingEngine:
                 if pos.stop_loss is not None:
                     hit_sl: bool = (
                         current_price <= pos.stop_loss
-                        if pos.side == "Buy"
+                        if pos.side == "buy"
                         else current_price >= pos.stop_loss
                     )
                     if hit_sl:
@@ -341,7 +347,7 @@ class PaperTradingEngine:
                 if pos.take_profit is not None:
                     hit_tp: bool = (
                         current_price >= pos.take_profit
-                        if pos.side == "Buy"
+                        if pos.side == "buy"
                         else current_price <= pos.take_profit
                     )
                     if hit_tp:
@@ -389,8 +395,9 @@ class PaperTradingEngine:
         return self._get_equity_unlocked()
 
     def _get_equity_unlocked(self) -> float:
-        unrealized: float = sum(p.unrealized_pnl for p in self.positions.values())
-        return self.balance + self._used_margin + unrealized
+        return self.balance + sum(
+            p.margin + p.unrealized_pnl for p in self.positions.values()
+        )
 
     def get_performance_report(self) -> Dict[str, Any]:
         """
@@ -462,7 +469,7 @@ class PaperTradingEngine:
         Long:  price <= entry * (1 - 1/L + mm + buffer)
         Short: price >= entry * (1 + 1/L - mm - buffer)
         """
-        if pos.side == "Buy":
+        if pos.side == "buy":
             liq_price: float = pos.entry_price * (1 - 1 / pos.leverage + MAINTENANCE_MARGIN + LIQUIDATION_BUFFER)
             return current_price <= liq_price
         else:
@@ -486,7 +493,7 @@ class PaperTradingEngine:
         Short receives funding_rate > 0; pays   funding_rate < 0.
         """
         notional: float = position.qty * position.entry_price
-        payment: float = notional * funding_rate * (-1 if position.side == "Buy" else 1)
+        payment: float = notional * funding_rate * (-1 if position.side == "buy" else 1)
         position.funding_paid += payment
         self.funding_paid += payment
         self.balance += payment
@@ -514,7 +521,11 @@ class PaperTradingEngine:
     # ------------------------------------------------------------------ #
 
     async def _get_price(self, symbol: str) -> float:
-        """Fetch latest price from client or raise."""
+        """Fetch latest price from cache, client, or raise."""
+        # 1. Check cached price from tick()
+        if symbol in self._last_prices:
+            return float(self._last_prices[symbol])
+        # 2. Try client
         if self.client is not None:
             try:
                 return await self.client.get_latest_price(symbol)
@@ -525,7 +536,7 @@ class PaperTradingEngine:
     @staticmethod
     def _calc_pnl(pos: _PaperPosition, price: float, qty: float) -> float:
         """Calculate PnL for a given exit price and quantity."""
-        if pos.side == "Buy":
+        if pos.side == "buy":
             return (price - pos.entry_price) * qty
         return (pos.entry_price - price) * qty
 

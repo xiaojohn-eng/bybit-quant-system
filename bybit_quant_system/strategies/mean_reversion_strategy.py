@@ -28,8 +28,8 @@ class MeanReversionStrategy(BaseStrategy):
     def __init__(self, config: dict = None):
         default_config = {
             "rsi_period": 14,
-            "overbought": 80,
-            "oversold": 20,
+            "overbought": 65,   # 从80下调 - 加密货币阈值调整为更实际的水平
+            "oversold": 35,     # 从20上调
             "bb_period": 20,
             "bb_std": 2.0,
         }
@@ -144,19 +144,25 @@ class MeanReversionStrategy(BaseStrategy):
         action = "hold"
         confidence = 0.0
 
-        # 3. 判断买入信号 (超卖 + 触及下轨)
-        if latest_rsi < self.config["oversold"] and latest_close <= latest_lower:
+        # 3. 判断买入信号 (RSI超卖 OR 价格跌破下轨)
+        is_oversold = latest_rsi < self.config["oversold"]
+        is_below_bb = latest_close <= latest_lower
+        if is_oversold or is_below_bb:
             action = "buy"
-            # 5. 买入置信度: (oversold - RSI) / oversold
-            confidence = (self.config["oversold"] - latest_rsi) / self.config["oversold"]
-            confidence = max(0.0, min(1.0, confidence))
+            # 5. 买入置信度: 综合RSI偏离度和BB偏离度
+            rsi_score = max(0, (self.config["oversold"] - latest_rsi) / self.config["oversold"]) if is_oversold else 0
+            bb_score = max(0, (latest_lower - latest_close) / max(latest_upper - latest_lower, 1e-10)) if is_below_bb else 0
+            confidence = min(max(rsi_score, bb_score, 0.3), 1.0)
 
-        # 4. 判断卖出信号 (超买 + 触及上轨)
-        elif latest_rsi > self.config["overbought"] and latest_close >= latest_upper:
+        # 4. 判断卖出信号 (RSI超买 OR 价格突破上轨)
+        is_overbought = latest_rsi > self.config["overbought"]
+        is_above_bb = latest_close >= latest_upper
+        if is_overbought or is_above_bb:
             action = "sell"
-            # 5. 卖出置信度: (RSI - overbought) / (100 - overbought)
-            confidence = (latest_rsi - self.config["overbought"]) / (100.0 - self.config["overbought"])
-            confidence = max(0.0, min(1.0, confidence))
+            # 5. 卖出置信度
+            rsi_score = max(0, (latest_rsi - self.config["overbought"]) / (100.0 - self.config["overbought"])) if is_overbought else 0
+            bb_score = max(0, (latest_close - latest_upper) / max(latest_upper - latest_lower, 1e-10)) if is_above_bb else 0
+            confidence = min(max(rsi_score, bb_score, 0.3), 1.0)
 
         return Signal(
             action=action,

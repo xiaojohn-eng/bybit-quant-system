@@ -55,8 +55,11 @@ class RiskManager:
     def __init__(self, config: dict = None):
         """
         Args:
-            config: 风控配置字典，可包含 RiskConfig 的所有字段
+            config: 风控配置字典，可包含 RiskConfig 的所有字段，或 Config 对象
         """
+        # 如果是Config对象，提取risk配置
+        if hasattr(config, 'risk'):
+            config = config.risk.__dict__ if hasattr(config.risk, '__dict__') else config.risk
         config = config or {}
         self.config = RiskConfig(
             max_risk_per_trade=config.get("max_risk_per_trade", 0.01),

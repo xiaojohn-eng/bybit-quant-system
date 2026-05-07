@@ -138,25 +138,18 @@ class BreakoutStrategy(BaseStrategy):
         action = "hold"
         confidence = 0.0
 
-        # 突破买入条件:
-        # - 近期有挤压
-        # - 收盘价 > 上轨 + breakout_mult * ATR
-        # - 成交量 > volume_mult * 成交量均值
-        if squeeze_recent:
-            breakout_level_upper = latest_upper + self.config["breakout_mult"] * latest_atr
-            volume_threshold = latest_vol_sma * self.config["volume_mult"]
+        # 突破条件: 价格突破布林带 +/- ATR缓冲
+        # 买入: 收盘 > 上轨 + 0.3*ATR
+        # 卖出: 收盘 < 下轨 - 0.3*ATR
+        breakout_level_upper = latest_upper + 0.3 * latest_atr
+        breakout_level_lower = latest_lower - 0.3 * latest_atr
+        volume_threshold = latest_vol_sma * self.config["volume_mult"]
+        volume_ok = latest_vol_sma > 0 and latest_volume > volume_threshold
 
-            if latest_close > breakout_level_upper and latest_volume > volume_threshold:
-                action = "buy"
-
-            # 突破卖出条件:
-            # - 近期有挤压
-            # - 收盘价 < 下轨 - breakout_mult * ATR
-            # - 成交量确认
-            breakout_level_lower = latest_lower - self.config["breakout_mult"] * latest_atr
-
-            if latest_close < breakout_level_lower and latest_volume > volume_threshold:
-                action = "sell"
+        if latest_close > breakout_level_upper and volume_ok:
+            action = "buy"
+        elif latest_close < breakout_level_lower and volume_ok:
+            action = "sell"
 
         # 6. 计算置信度
         if action in ("buy", "sell"):

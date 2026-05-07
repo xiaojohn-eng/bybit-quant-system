@@ -16,6 +16,8 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 import numpy as np
 import pandas as pd
 
+from bybit_quant_system.strategies.base_strategy import Signal as StrategySignal
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,21 +65,6 @@ class Trade:
 
 
 @dataclass
-class Signal:
-    """Trading signal emitted by a strategy."""
-
-    action: str                    # "buy", "sell", "hold"
-    price: Optional[float] = None
-    size_pct: Optional[float] = None
-    sl_pct: Optional[float] = None
-    tp_pct: Optional[float] = None
-
-    # Optional ML-enhanced fields
-    quality_score: Optional[float] = None
-    confidence: Optional[float] = None
-
-
-@dataclass
 class BacktestResult:
     """Container for backtest results."""
 
@@ -98,7 +85,7 @@ class StrategyProtocol(Protocol):
 
     name: str
 
-    def generate_signal(self, df: pd.DataFrame) -> Signal:
+    def generate_signal(self, df: pd.DataFrame) -> StrategySignal:
         ...
 
     def get_parameters(self) -> Dict[str, Any]:
@@ -305,7 +292,7 @@ class BacktestEngine:
 
     def _process_signal(
         self,
-        signal: Signal,
+        signal: StrategySignal,
         bar: pd.Series,
         idx: int,
         leverage: float,
@@ -313,8 +300,9 @@ class BacktestEngine:
         """Process a buy/sell signal."""
         close_p = float(bar["close"])
 
-        # Determine desired side
-        desired_side = "long" if signal.action == "buy" else "short"
+        # Map strategy signal action to position side
+        action_map = {"buy": "long", "sell": "short"}
+        desired_side = action_map.get(signal.action, signal.action)
 
         # If we have an opposite position, close it first
         if self._position is not None and self._position.side != desired_side:
@@ -326,27 +314,29 @@ class BacktestEngine:
 
         # If flat (or just closed opposite), open new position
         if self._position is None:
-            # Determine position size
-            size_pct = signal.size_pct if signal.size_pct is not None else 0.95
+            # Determine position size from confidence (default 0.95 if not set)
+            size_pct = signal.confidence * 0.95 if signal.confidence is not None else 0.95
             position_value = self._capital * size_pct * leverage
             qty = position_value / (close_p * (1 + self.slippage_pct))
 
             # Apply slippage on entry
             fill_price = close_p * (1 + self.slippage_pct)
 
-            # Calculate SL/TP prices
+            # Calculate SL/TP prices from metadata or defaults
             sl_price = None
             tp_price = None
-            if signal.sl_pct is not None:
+            sl_pct = signal.metadata.get("sl_pct", 0.02) if signal.metadata else 0.02
+            tp_pct = signal.metadata.get("tp_pct", 0.04) if signal.metadata else 0.04
+            if sl_pct is not None:
                 if desired_side == "long":
-                    sl_price = fill_price * (1 - signal.sl_pct)
+                    sl_price = fill_price * (1 - sl_pct)
                 else:
-                    sl_price = fill_price * (1 + signal.sl_pct)
-            if signal.tp_pct is not None:
+                    sl_price = fill_price * (1 + sl_pct)
+            if tp_pct is not None:
                 if desired_side == "long":
-                    tp_price = fill_price * (1 + signal.tp_pct)
+                    tp_price = fill_price * (1 + tp_pct)
                 else:
-                    tp_price = fill_price * (1 - signal.tp_pct)
+                    tp_price = fill_price * (1 - tp_pct)
 
             # Deduct taker fee on entry
             fee = position_value * self.taker_fee
