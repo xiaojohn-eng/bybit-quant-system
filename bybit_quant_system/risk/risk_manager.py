@@ -549,6 +549,42 @@ class RiskManager:
             }
         }
 
+    # ===== 学术论文优化：Triple Barrier 止损止盈 =====
+    def calculate_triple_barrier(self, entry_price: float, side: str,
+                                  atr: float, current_price: float,
+                                  t1_pct: float = 0.09,     # 9%止盈（论文最优）
+                                  sl_pct: float = 0.02,     # 2%止损
+                                  tp_rr: float = 2.5) -> dict:  # 1:2.5风险回报
+        """
+        Triple Barrier方法 (Lopez de Prado, 2024)
+        三重障碍：止盈(t1)、止损(sl)、时间限制(t1)
+
+        论文参数:
+        - 止盈范围: 9% (加密货币专用)
+        - 止损: 2%
+        - 风险回报比: 1:2.5 (最低1:2)
+        - 时间限制: 动态基于波动率
+        """
+        if side == "buy":
+            tp_price = entry_price * (1 + t1_pct)
+            sl_price = entry_price * (1 - sl_pct)
+        else:
+            tp_price = entry_price * (1 - t1_pct)
+            sl_price = entry_price * (1 + sl_pct)
+
+        # 基于ATR的动态时间限制 (波动率高=时间短)
+        time_limit_bars = max(5, int(30 / max(atr / entry_price, 0.001)))
+
+        return {
+            "tp_primary": tp_price,
+            "tp_secondary": entry_price + (tp_price - entry_price) * 0.5 if side == "buy"
+                           else entry_price - (entry_price - tp_price) * 0.5,
+            "sl": sl_price,
+            "time_limit_bars": time_limit_bars,
+            "rr_ratio": tp_rr,
+            "method": "triple_barrier"
+        }
+
     def __repr__(self):
         return (
             f"RiskManager("

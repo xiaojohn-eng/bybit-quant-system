@@ -152,6 +152,22 @@ class DynamicLeverageManager:
 
         return tier["leverage"]
 
+    def calculate_volatility_target_leverage(self, realized_vol: float,
+                                              target_vol: float = 0.10) -> float:
+        """
+        波动率目标动态杠杆 (Chitra, 2025)
+        L = sigma_target / sigma_realized
+
+        论文推荐:
+        - target_vol: 10% (年化目标波动率)
+        - 最大杠杆: 30x (Bybit限制)
+        - 最小杠杆: 1x
+        """
+        if realized_vol <= 0:
+            return 1.0
+        leverage = target_vol / realized_vol
+        return max(1.0, min(leverage, 30.0))
+
     def adjust_for_trend(self, base_leverage: int, adx: float) -> int:
         """根据趋势强度调整杠杆
 

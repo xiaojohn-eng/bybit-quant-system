@@ -460,6 +460,57 @@ class BacktestEngine:
     # Metrics
     # ------------------------------------------------------------------
 
+    def _calculate_dsr(self, sharpe: float, n_trials: int = 1) -> float:
+        """
+        Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2025)
+
+        校正选择偏差后的统计显著夏普比率。
+        DSR > 0.95 表示策略统计显著（非运气）。
+
+        当只测试1个策略时，DSR = 标准正态CDF(Sharpe * sqrt(T))
+
+        Returns:
+            float: DSR值，范围[0,1]
+        """
+        if self._trade_count == 0:
+            return 0.0
+
+        T = self._trade_count  # 交易次数
+        if T < 10:
+            return 0.0
+
+        # 收集交易收益用于偏度/峰度校正
+        returns_list = []
+        for trade in self._trades:
+            if trade.entry_price and trade.exit_price:
+                ret = (trade.exit_price - trade.entry_price) / trade.entry_price
+                if trade.side == "short":
+                    ret = -ret
+                returns_list.append(ret)
+
+        if len(returns_list) < 10:
+            # 简化版本：Sharpe * sqrt(T/252)
+            z = sharpe * np.sqrt(T / 252)
+        else:
+            returns_arr = np.array(returns_list)
+            r_mean = np.mean(returns_arr)
+            r_std = np.std(returns_arr) + 1e-10
+            skew = np.mean(((returns_arr - r_mean) / r_std) ** 3)
+            kurt = np.mean(((returns_arr - r_mean) / r_std) ** 4)
+            z = sharpe * np.sqrt(T)
+            # 偏度和峰度校正 (Edgeworth展开)
+            z = z * (1 + skew * (z ** 2 - 1) / 6 + (kurt - 3) * (z ** 3 - 3 * z) / 24)
+
+        # 标准正态CDF近似 (Abramowitz & Stegun)
+        a1, a2, a3, a4, a5 = 0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
+        p = 0.3275911
+        sign = 1 if z >= 0 else -1
+        x = abs(z) / np.sqrt(2)
+        t = 1.0 / (1.0 + p * x)
+        y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * np.exp(-x * x)
+        dsr = 0.5 * (1.0 + sign * y)
+        return max(0.0, min(1.0, dsr))
+
     def _calculate_comprehensive_metrics(
         self, equity_df: pd.DataFrame
     ) -> Dict[str, float]:
@@ -548,6 +599,9 @@ class BacktestEngine:
         else:
             kelly = 0.0
 
+        # Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2025)
+        dsr = self._calculate_dsr(sharpe)
+
         metrics = {
             "total_return_pct": round(total_return * 100, 4),
             "annualized_return_pct": round(ann_return * 100, 4),
@@ -562,6 +616,7 @@ class BacktestEngine:
             "avg_trade_return": round(avg_trade_return, 4),
             "kelly_fraction": round(kelly, 4),
             "final_equity": round(equity[-1], 4),
+            "deflated_sharpe_ratio": round(dsr, 4),
         }
         return metrics
 

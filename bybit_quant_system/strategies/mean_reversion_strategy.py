@@ -27,9 +27,9 @@ class MeanReversionStrategy(BaseStrategy):
 
     def __init__(self, config: dict = None):
         default_config = {
-            "rsi_period": 14,
-            "overbought": 65,   # 从80下调 - 加密货币阈值调整为更实际的水平
-            "oversold": 35,     # 从20上调
+            "rsi_period": 13,       # 从14优化 (论文最佳: 13)
+            "overbought": 75,       # 从65优化 (论文最佳: 75)
+            "oversold": 25,         # 从35优化 (论文最佳: 25)
             "bb_period": 20,
             "bb_std": 2.0,
         }

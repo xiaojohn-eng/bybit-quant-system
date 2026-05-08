@@ -234,8 +234,10 @@ class StrategyOptimizer:
             fold = df.iloc[start:end]
 
             split_idx = int(len(fold) * train_pct)
+            # Purge gap: 论文推荐 1-5 天，防止数据泄漏
+            purge_gap = max(1, min(5, split_idx // 10))
             train_df = fold.iloc[:split_idx]
-            test_df = fold.iloc[split_idx:]
+            test_df = fold.iloc[split_idx + purge_gap:]
 
             if len(train_df) < 50 or len(test_df) < 20:
                 continue
@@ -260,6 +262,83 @@ class StrategyOptimizer:
             np.std(scores) if scores else 0.0,
         )
         return scores
+
+    # ------------------------------------------------------------------
+    # CSCV PBO (Probability of Backtest Overfitting)
+    # ------------------------------------------------------------------
+
+    def calculate_pbo(self, results_matrix: np.ndarray, S: int = 16) -> float:
+        """
+        CSCV Probabilty of Backtest Overfitting (Lopez de Prado, 2024)
+
+        PBO度量选择偏差的概率。
+        PBO < 0.5: 可接受
+        PBO < 0.3: 良好
+        PBO < 0.1: 优秀
+        PBO > 0.5: 高风险（过拟合）
+
+        Args:
+            results_matrix: shape (n_strategies, n_periods) 各策略各期IS Sharpe
+            S: CSCV分割数，论文推荐S=16
+
+        Returns:
+            float: PBO值 [0, 1]
+        """
+        n_strategies, n_periods = results_matrix.shape
+        if n_strategies < 2 or n_periods < S:
+            return 1.0  # 数据不足，假设高PBO
+
+        # 将period分为S组
+        group_size = n_periods // S
+        if group_size < 1:
+            return 1.0
+
+        logit_values = []
+
+        # 生成所有C(S, S/2)组合
+        half = S // 2
+
+        # 简化版本：随机采样组合
+        np.random.seed(42)
+        n_combinations = min(100, max(10, S))
+
+        for _ in range(n_combinations):
+            # 随机分成两组
+            indices = np.random.permutation(S)
+            set1_indices = indices[:half]
+            set2_indices = indices[half:]
+
+            # 映射回period索引
+            periods1 = []
+            periods2 = []
+            for gi in set1_indices:
+                start = gi * group_size
+                end = min(start + group_size, n_periods)
+                periods1.extend(range(start, end))
+            for gi in set2_indices:
+                start = gi * group_size
+                end = min(start + group_size, n_periods)
+                periods2.extend(range(start, end))
+
+            # 计算IS和OOS性能
+            is_means = np.mean(results_matrix[:, periods1], axis=1)
+            oos_means = np.mean(results_matrix[:, periods2], axis=1)
+
+            # 找到IS最佳策略
+            best_is_idx = np.argmax(is_means)
+
+            # 计算logit
+            if is_means[best_is_idx] != 0:
+                rank = np.sum(oos_means < oos_means[best_is_idx])
+                logit = np.log((rank + 0.5) / (n_strategies - rank + 0.5))
+                logit_values.append(logit)
+
+        if not logit_values:
+            return 1.0
+
+        # PBO = P(logit < 0)
+        pbo = np.sum(np.array(logit_values) < 0) / len(logit_values)
+        return pbo
 
     # ------------------------------------------------------------------
     # 3. Monte-Carlo simulation

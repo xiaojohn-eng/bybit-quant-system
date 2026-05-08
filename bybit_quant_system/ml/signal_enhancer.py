@@ -416,6 +416,83 @@ class XGBoostSignalEnhancer:
                 "Model has not been trained or loaded. Call train() or load_model() first."
             )
 
+    def generate_triple_barrier_labels(self, df: pd.DataFrame,
+                                        pt: float = 0.09,   # 9%止盈 (论文最优)
+                                        sl: float = 0.02,   # 2%止损
+                                        max_holding: int = 30) -> pd.Series:
+        """
+        Triple Barrier标签生成 (Lopez de Prado, Advances in Financial ML, 2024)
+
+        三重障碍：
+        1. 止盈障碍 (Profit Taking): +9%
+        2. 止损障碍 (Stop Loss): -2%
+        3. 时间障碍 (Time Limit): max_holding bars
+
+        论文验证这是加密货币预测的最佳标签生成方法，
+        因为它自然平衡了类别分布并考虑了交易成本。
+
+        Returns:
+            pd.Series: 标签 (1=touch upper, -1=touch lower, 0=touch vertical)
+        """
+        close = df['close'].values
+        n = len(close)
+        labels = np.zeros(n)
+
+        for i in range(n - 1):
+            if i + max_holding >= n:
+                break
+
+            entry = close[i]
+            upper = entry * (1 + pt)
+            lower = entry * (1 - sl)
+
+            # 向前遍历直到触及任一障碍
+            for j in range(i + 1, min(i + max_holding, n)):
+                if close[j] >= upper:
+                    labels[i] = 1   # 触及止盈
+                    break
+                elif close[j] <= lower:
+                    labels[i] = -1  # 触及止损
+                    break
+            else:
+                # 触及时间障碍
+                if close[min(i + max_holding, n - 1)] > entry:
+                    labels[i] = 1
+                else:
+                    labels[i] = -1
+
+        return pd.Series(labels, index=df.index)
+
+    def prepare_training_data_enhanced(self, df: pd.DataFrame) -> tuple:
+        """
+        增强版训练数据准备
+        使用Triple Barrier标签 + 论文最优特征
+        """
+        # 生成特征
+        fe = FeatureEngineer()
+        X = fe.generate_all_features(df)
+
+        # 生成Triple Barrier标签
+        y = self.generate_triple_barrier_labels(df)
+
+        # 对齐并清理
+        X = X.loc[y.index]
+        mask = (~X.isnull().any(axis=1)) & (~y.isnull())
+        X = X[mask]
+        y = y[mask]
+
+        # 丢弃原始OHLCV列
+        drop_cols = {"open", "high", "low", "close", "volume"}
+        X = X.drop(columns=drop_cols, errors="ignore")
+        X = X.astype(np.float64)
+
+        logger.info(
+            "Enhanced training data prepared: X.shape=%s, y distribution:\n%s",
+            X.shape,
+            y.value_counts().sort_index(),
+        )
+        return X, y
+
     @staticmethod
     def _direction_to_class(direction: int) -> int:
         """

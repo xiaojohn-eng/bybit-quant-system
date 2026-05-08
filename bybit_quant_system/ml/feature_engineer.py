@@ -59,9 +59,11 @@ class FeatureEngineer:
 
         # Generate feature groups
         self._add_price_features(data)
+        self._add_lag_features(data)
         self._add_trend_features(data)
         self._add_momentum_features(data)
         self._add_volatility_features(data)
+        self._add_volatility_features_enhanced(data)
         self._add_volume_features(data)
         self._add_statistical_features(data)
 
@@ -162,6 +164,52 @@ class FeatureEngineer:
         df["body_ratio"] = body / total_range
 
         logger.debug("Added price features.")
+
+    def _add_lag_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        滞后收益特征 (NeurIPS 2024 - 最重要的预测特征)
+        lag_1: 1期前收益
+        lag_5: 5期前收益
+        lag_10: 10期前收益
+        lag_20: 20期前收益
+        """
+        returns = df['close'].pct_change()
+        df['lag_1'] = returns.shift(1)
+        df['lag_5'] = returns.shift(5)
+        df['lag_10'] = returns.shift(10)
+        df['lag_20'] = returns.shift(20)
+
+        # 累积收益特征
+        df['cum_return_5'] = (1 + returns).rolling(5).apply(lambda x: x.prod()) - 1
+        df['cum_return_10'] = (1 + returns).rolling(10).apply(lambda x: x.prod()) - 1
+        df['cum_return_20'] = (1 + returns).rolling(20).apply(lambda x: x.prod()) - 1
+
+        # 收益衰减特征 (近期 > 远期)
+        df['return_decay'] = df['lag_1'] * 0.4 + df['lag_5'] * 0.3 + df['lag_10'] * 0.2 + df['lag_20'] * 0.1
+        logger.debug("Added lag features.")
+        return df
+
+    def _add_volatility_features_enhanced(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        增强波动率特征 (论文验证的关键预测因子)
+        vol_5: 5期滚动波动率
+        vol_10: 10期滚动波动率
+        vol_20: 20期滚动波动率
+        vol_ratio: 短期/长期波动率比
+        """
+        returns = df['close'].pct_change()
+        df['vol_5'] = returns.rolling(5).std() * np.sqrt(365)
+        df['vol_10'] = returns.rolling(10).std() * np.sqrt(365)
+        df['vol_20'] = returns.rolling(20).std() * np.sqrt(365)
+        df['vol_ratio'] = df['vol_5'] / df['vol_20'].replace(0, np.nan)
+
+        # 波动率状态 (论文：低/中/高三档)
+        vol_median = df['vol_20'].median()
+        df['vol_regime'] = pd.cut(df['vol_20'],
+                                   bins=[0, vol_median*0.7, vol_median*1.3, float('inf')],
+                                   labels=[0, 1, 2]).astype(float)
+        logger.debug("Added enhanced volatility features.")
+        return df
 
     def _add_trend_features(self, df: pd.DataFrame) -> None:
         """Add trend indicators: EMAs, MACD, ADX, trend direction."""

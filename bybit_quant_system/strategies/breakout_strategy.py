@@ -30,6 +30,8 @@ class BreakoutStrategy(BaseStrategy):
             "squeeze_period": 20,
             "breakout_mult": 1.5,
             "volume_mult": 1.5,
+            "sl_atr_mult": 2.5,     # 新增：论文最优止损ATR倍数
+            "tp_rr": 2.5,           # 新增：论文最优风险回报比
         }
         if config:
             default_config.update(config)

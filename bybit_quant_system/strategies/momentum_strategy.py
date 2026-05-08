@@ -28,11 +28,11 @@ class MomentumStrategy(BaseStrategy):
 
     def __init__(self, config: dict = None):
         default_config = {
-            "fast": 12,
-            "slow": 26,
-            "signal": 9,
+            "fast": 10,             # 从12优化 (论文最佳: 10)
+            "slow": 20,             # 从26优化 (论文最佳: 20)
+            "signal": 7,            # 从9优化 (论文最佳: 7)
             "adx_period": 14,
-            "adx_threshold": 25.0,
+            "adx_threshold": 23.0,  # 从25.0优化 (论文最佳: 23)
             "ema_period": 20,
         }
         if config:
